@@ -1,0 +1,176 @@
+version: '3.8'
+
+services:
+  consul-server-1:
+    image: consul:1.15.4
+    container_name: consul-server-1
+    restart: unless-stopped
+    hostname: consul-server-1
+    networks:
+      - consul-network
+    ports:
+      - "8500:8500"
+      - "8600:8600/tcp"
+      - "8600:8600/udp"
+    volumes:
+      - consul-data-1:/consul/data
+      - ./consul-config:/consul/config
+    command: >
+      agent -server
+      -bootstrap-expect=3
+      -node=consul-server-1
+      -bind=0.0.0.0
+      -client=0.0.0.0
+      -retry-join=consul-server-2
+      -retry-join=consul-server-3
+      -ui
+      -datacenter=dc1
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+      - CONSUL_CLIENT_INTERFACE=eth0
+
+  consul-server-2:
+    image: consul:1.15.4
+    container_name: consul-server-2
+    restart: unless-stopped
+    hostname: consul-server-2
+    networks:
+      - consul-network
+    volumes:
+      - consul-data-2:/consul/data
+      - ./consul-config:/consul/config
+    command: >
+      agent -server
+      -bootstrap-expect=3
+      -node=consul-server-2
+      -bind=0.0.0.0
+      -client=0.0.0.0
+      -retry-join=consul-server-1
+      -retry-join=consul-server-3
+      -datacenter=dc1
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+      - CONSUL_CLIENT_INTERFACE=eth0
+
+  consul-server-3:
+    image: consul:1.15.4
+    container_name: consul-server-3
+    restart: unless-stopped
+    hostname: consul-server-3
+    networks:
+      - consul-network
+    volumes:
+      - consul-data-3:/consul/data
+      - ./consul-config:/consul/config
+    command: >
+      agent -server
+      -bootstrap-expect=3
+      -node=consul-server-3
+      -bind=0.0.0.0
+      -client=0.0.0.0
+      -retry-join=consul-server-1
+      -retry-join=consul-server-2
+      -datacenter=dc1
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+      - CONSUL_CLIENT_INTERFACE=eth0
+
+  consul-client:
+    image: consul:1.15.4  
+    container_name: consul-client
+    restart: unless-stopped
+    hostname: consul-client
+    networks:
+      - consul-network
+    volumes:
+      - consul-client-data:/consul/data
+      - ./consul-config:/consul/config
+    command: >
+      agent
+      -node=consul-client
+      -bind=0.0.0.0
+      -client=0.0.0.0
+      -retry-join=consul-server-1
+      -datacenter=dc1
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+      - CONSUL_CLIENT_INTERFACE=eth0
+    depends_on:
+      - consul-server-1
+      - consul-server-2
+      - consul-server-3
+
+  catalog-service:
+    build:
+      context: .
+      dockerfile: Catalog-Service/Dockerfile
+    container_name: catalog-service
+    restart: unless-stopped
+    hostname: catalog-service
+    networks:
+      - consul-network
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
+    depends_on:
+      - consul-client
+    volumes:
+      - ./Catalog-Service/appsettings.json:/app/appsettings.json:ro
+
+  order-service:
+    build:
+      context: .
+      dockerfile: Order-Service/Dockerfile
+    container_name: order-service
+    restart: unless-stopped
+    hostname: order-service
+    networks:
+      - consul-network
+    ports:
+      - "5001:5001"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5001
+    depends_on:
+      - consul-client
+      - catalog-service
+    volumes:
+      - ./Order-Service/appsettings.json:/app/appsettings.json:ro
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: API-Gateway/Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    hostname: api-gateway
+    networks:
+      - consul-network
+    ports:
+      - "7000:7000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:7000
+    depends_on:
+      - consul-client
+      - catalog-service
+      - order-service
+    volumes:
+      - ./API-Gateway/appsettings.json:/app/appsettings.json:ro
+      - ./API-Gateway/ocelot.json:/app/ocelot.json:ro
+
+networks:
+  consul-network:
+    driver: bridge
+
+volumes:
+  consul-data-1:
+    driver: local
+  consul-data-2:
+    driver: local
+  consul-data-3:
+    driver: local
+  consul-client-data:
+    driver: local
